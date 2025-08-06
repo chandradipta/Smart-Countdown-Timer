@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Smart Countdown Timer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    :root {
+      --bg-light: #f0f8ff;
+      --bg-dark: #6600ff;
+      --fg-light: #000;
+      --fg-dark: #fff;
+      --accent: #000066;
+    }
+
+    body {
+      margin: 0;
+      font-family: Georgia, serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background-color: var(--bg);
+      color: var(--fg);
+      transition: background 0.3s, color 0.3s;
+    }
+
+    h1 {
+      margin-top: 20px;
+    }
+
+    .timer {
+      position: relative;
+      width: 220px;
+      height: 220px;
+      margin: 20px 0;
+    }
+
+    svg {
+      transform: rotate(-90deg);
+    }
+
+    circle {
+      fill: none;
+      stroke-width: 15;
+    }
+
+    .circle-bg {
+      stroke: #444;
+    }
+
+    .circle-progress {
+      stroke: #000066;
+      stroke-linecap: round;
+      transition: stroke 0.3s;
+    }
+
+    .time {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 2rem;
+    }
+
+    .controls, .presets {
+      text-align: center;
+      margin-top: 10px;
+    }
+
+    .controls input, .presets input, .presets select {
+      width: 60px;
+      padding: 5px;
+      margin: 4px;
+      text-align: center;
+    }
+
+    .controls button, .presets button {
+      padding: 6px 14px;
+      margin: 4px;
+      cursor: pointer;
+    }
+
+    .toggles {
+      margin-top: 10px;
+    }
+
+    label {
+      font-size: 0.9rem;
+      margin: 0 10px;
+    }
+
+    .theme-btn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      padding: 6px 10px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <button class="theme-btn" onclick="toggleTheme()">Toggle Theme</button>
+  <h1>Smart Countdown Timer</h1>
+
+  <div class="timer">
+    <svg width="220" height="220">
+      <circle class="circle-bg" cx="110" cy="110" r="90" />
+      <circle class="circle-progress" cx="110" cy="110" r="90" />
+    </svg>
+    <div class="time" id="time">00:00</div>
+  </div>
+
+  <div class="controls">
+    <input type="number" id="hours" placeholder="Hr" min="0" />
+    <input type="number" id="minutes" placeholder="Min" min="0" />
+    <input type="number" id="seconds" placeholder="Sec" min="0" max="59" />
+    <br />
+    <button onclick="startTimer()">Start</button>
+    <button onclick="pauseTimer()">Pause</button>
+    <button onclick="resumeTimer()">Resume</button>
+    <button onclick="stopTimer()">Stop</button>
+  </div>
+
+  <div class="toggles">
+    <label><input type="checkbox" id="repeatToggle" /> Repeat</label>
+  </div>
+
+  <div class="presets">
+    <input type="text" id="presetName" placeholder="Preset Name" />
+    <button onclick="savePreset()">Save</button>
+    <select id="presetList"></select>
+    <button onclick="loadPreset()">Load</button>
+  </div>
+
+  <audio id="alarm" src="Timer.mp3" loop></audio>
+
+  <script>
+    const circle = document.querySelector(".circle-progress");
+    const radius = circle.r.baseVal.value;
+    const circumference = 2 * Math.PI * radius;
+    const timeEl = document.getElementById("time");
+    const alarm = document.getElementById("alarm");
+    const presetList = document.getElementById("presetList");
+
+    circle.style.strokeDasharray = circumference;
+    circle.style.strokeDashoffset = circumference;
+
+    let totalTime = 0, remainingTime = 0, startTime = 0;
+    let paused = false, timerRunning = false, pauseTime = 0;
+    let animationFrame;
+
+    // Theme
+    const themePref = localStorage.getItem("theme") || "dark";
+    setTheme(themePref);
+
+    function setTheme(mode) {
+      document.body.style.setProperty("--bg", mode === "light" ? "var(--bg-light)" : "var(--bg-dark)");
+      document.body.style.setProperty("--fg", mode === "light" ? "var(--fg-light)" : "var(--fg-dark)");
+      localStorage.setItem("theme", mode);
+    }
+
+    function toggleTheme() {
+      const mode = localStorage.getItem("theme") === "light" ? "dark" : "light";
+      setTheme(mode);
+    }
+
+    function updateCircle(percentage) {
+      const offset = circumference * (1 - percentage);
+      circle.style.strokeDashoffset = offset;
+      circle.style.stroke = remainingTime <= 10 ? "#ff0033" : "#000066";
+    }
+
+    function updateDisplay(timeInSeconds) {
+      const h = Math.floor(timeInSeconds / 3600);
+      const m = Math.floor((timeInSeconds % 3600) / 60);
+      const s = Math.floor(timeInSeconds % 60);
+      timeEl.textContent =
+        (h > 0 ? (h < 10 ? "0" + h : h) + ":" : "") +
+        (m < 10 ? "0" + m : m) + ":" +
+        (s < 10 ? "0" + s : s);
+    }
+
+    function startTimer() {
+      const h = parseInt(document.getElementById("hours").value) || 0;
+      const m = parseInt(document.getElementById("minutes").value) || 0;
+      const s = parseInt(document.getElementById("seconds").value) || 0;
+      totalTime = h * 3600 + m * 60 + s;
+
+      if (totalTime <= 0) return;
+
+      remainingTime = totalTime;
+      startTime = performance.now();
+      timerRunning = true;
+      paused = false;
+      cancelAnimationFrame(animationFrame);
+      animate();
+    }
+
+    function pauseTimer() {
+      if (timerRunning && !paused) {
+        paused = true;
+        pauseTime = performance.now();
+        cancelAnimationFrame(animationFrame);
+        alarm.pause();
+        alarm.currentTime = 0;
+      }
+    }
+
+    function resumeTimer() {
+      if (paused) {
+        const now = performance.now();
+        const pauseDuration = now - pauseTime;
+        startTime += pauseDuration;
+        paused = false;
+        animate();
+      }
+    }
+
+    function stopTimer() {
+      timerRunning = false;
+      paused = false;
+      cancelAnimationFrame(animationFrame);
+      updateDisplay(totalTime);
+      updateCircle(1);
+      alarm.pause();
+      alarm.currentTime = 0;
+    }
+
+    function animate(currentTime) {
+      if (!timerRunning || paused) return;
+
+      const elapsed = (currentTime - startTime) / 1000;
+      remainingTime = Math.max(totalTime - elapsed, 0);
+      const progress = remainingTime / totalTime;
+
+      updateDisplay(remainingTime);
+      updateCircle(progress);
+
+      if (remainingTime <= 0) {
+        alarm.play();
+        if (document.getElementById("repeatToggle").checked) {
+          startTime = performance.now();
+          remainingTime = totalTime;
+          animate();
+        } else {
+          timerRunning = false;
+        }
+        return;
+      }
+
+      animationFrame = requestAnimationFrame(animate);
+    }
+
+    // Presets
+    function savePreset() {
+      const name = document.getElementById("presetName").value.trim();
+      const h = document.getElementById("hours").value || 0;
+      const m = document.getElementById("minutes").value || 0;
+      const s = document.getElementById("seconds").value || 0;
+      if (!name) return;
+      const presets = JSON.parse(localStorage.getItem("presets") || "{}");
+      presets[name] = { h, m, s };
+      localStorage.setItem("presets", JSON.stringify(presets));
+      loadPresetList();
+    }
+
+    function loadPreset() {
+      const name = presetList.value;
+      const presets = JSON.parse(localStorage.getItem("presets") || "{}");
+      if (presets[name]) {
+        document.getElementById("hours").value = presets[name].h;
+        document.getElementById("minutes").value = presets[name].m;
+        document.getElementById("seconds").value = presets[name].s;
+      }
+    }
+
+    function loadPresetList() {
+      const presets = JSON.parse(localStorage.getItem("presets") || "{}");
+      presetList.innerHTML = "";
+      for (const name in presets) {
+        const opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = name;
+        presetList.appendChild(opt);
+      }
+    }
+
+    loadPresetList();
+  </script>
+</body>
+</html>
